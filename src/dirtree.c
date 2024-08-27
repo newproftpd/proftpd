@@ -159,6 +159,7 @@ unsigned char dir_hide_file(const char *path) {
   unsigned int ctxt_precedence = 0;
   unsigned char have_user_regex, have_group_regex, have_class_regex,
     have_all_regex, negated = FALSE;
+  unsigned char use_hide_root_files = FALSE;
 
   if (path == NULL) {
     return FALSE;
@@ -198,9 +199,22 @@ unsigned char dir_hide_file(const char *path) {
     file_name = dir_name;
   }
 
+  if (strcmp(dir_name, "/") == 0 && strcmp(file_name, "/")) {
+    c= find_config(get_dir_ctxt(tmp_pool, dir_name), CONF_PARAM, "HideRootChild", FALSE);
+    if (c != NULL) {
+      use_hide_root_files = *((unsigned char *)c->argv[0]);
+    }
+  }
+
   /* Check for any configured HideFiles */
-  c = find_config(get_dir_ctxt(tmp_pool, dir_name), CONF_PARAM, "HideFiles",
-    FALSE);
+  if (use_hide_root_files) {
+    c = find_config(get_dir_ctxt(tmp_pool, dir_name), CONF_PARAM, "HideRootFiles",
+      FALSE);
+  }
+  else {
+    c = find_config(get_dir_ctxt(tmp_pool, dir_name), CONF_PARAM, "HideFiles",
+      FALSE);
+  }
 
   while (c != NULL) {
     pr_signals_handle();
@@ -271,7 +285,12 @@ unsigned char dir_hide_file(const char *path) {
       }
     }
 
-    c = find_config_next(c, c->next, CONF_PARAM, "HideFiles", FALSE);
+    if (use_hide_root_files) {
+      c = find_config_next(c, c->next, CONF_PARAM, "HideRootFiles", FALSE);
+    }
+    else {
+      c = find_config_next(c, c->next, CONF_PARAM, "HideFiles", FALSE);
+    }
   }
 
   if (have_user_regex ||

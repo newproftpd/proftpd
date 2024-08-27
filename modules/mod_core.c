@@ -2572,6 +2572,178 @@ MODRET set_hidefiles(cmd_rec *cmd) {
 #endif
 }
 
+MODRET set_hiderootfiles(cmd_rec *cmd) {
+#ifdef PR_USE_REGEX
+  pr_regex_t *pre = NULL;
+  config_rec *c = NULL;
+  unsigned int precedence = 0;
+  unsigned char negated = FALSE, none = FALSE;
+  char *ptr;
+
+  int ctxt = (cmd->config && cmd->config->config_type != CONF_PARAM ?
+    cmd->config->config_type : cmd->server->config_type ?
+    cmd->server->config_type : CONF_ROOT);
+
+  /* This directive must have either 1, or 3, arguments */
+  if (cmd->argc-1 != 1 &&
+      cmd->argc-1 != 3) {
+    CONF_ERROR(cmd, "wrong number of parameters");
+  }
+
+  CHECK_CONF(cmd, CONF_DIR|CONF_DYNDIR);
+
+  /* Set the precedence for this config_rec based on its configuration
+   * context.
+   */
+  if (ctxt & CONF_DIR) {
+    precedence = 1;
+
+  } else {
+    precedence = 2;
+  }
+
+  /* Check for a leading '!' prefix, signifying regex negation */
+  ptr = cmd->argv[1];
+  if (*ptr == '!') {
+    negated = TRUE;
+    ptr++;
+
+  } else {
+    /* Check for a "none" argument, which is used to nullify inherited
+     * HideFiles configurations from parent directories.
+     */
+    if (strcasecmp(ptr, "none") == 0) {
+      none = TRUE;
+    }
+  }
+
+  if (!none) {
+    int res;
+
+    pre = pr_regexp_alloc(&core_module);
+
+    res = pr_regexp_compile(pre, ptr, REG_EXTENDED|REG_NOSUB);
+    if (res != 0) {
+      char errstr[200] = {'\0'};
+
+      pr_regexp_error(res, pre, errstr, sizeof(errstr));
+      pr_regexp_free(NULL, pre);
+
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", ptr,
+        "' failed regex compilation: ", errstr, NULL));
+    }
+  }
+
+  /* If the directive was used with 3 arguments, then the optional
+   * classifiers, and classifier expression, were used.  Make sure that
+   * a valid classifier was used.
+   */
+  if (cmd->argc-1 == 3) {
+    if (strcasecmp(cmd->argv[2], "user") != 0 &&
+        strcasecmp(cmd->argv[2], "group") != 0 &&
+        strcasecmp(cmd->argv[2], "class") != 0) {
+      return PR_ERROR_MSG(cmd, NULL, pstrcat(cmd->tmp_pool, cmd->argv[0],
+        "unknown classifier used: '", cmd->argv[2], "'", NULL));
+    }
+  }
+
+  if (cmd->argc-1 == 1) {
+    c = add_config_param(cmd->argv[0], 3, NULL, NULL, NULL);
+    c->argv[0] = pcalloc(c->pool, sizeof(pr_regex_t *));
+    *((pr_regex_t **) c->argv[0]) = pre;
+    c->argv[1] = pcalloc(c->pool, sizeof(unsigned char));
+    *((unsigned char *) c->argv[1]) = negated;
+    c->argv[2] = pcalloc(c->pool, sizeof(unsigned int));
+    *((unsigned int *) c->argv[2]) = precedence;
+
+    c->flags |= CF_MERGEDOWN_MULTI;
+
+  } else if (cmd->argc-1 == 3) {
+    array_header *acl = NULL;
+    unsigned int argc = cmd->argc - 3;
+    void **argv;
+
+    argv = &(cmd->argv[2]);
+
+    acl = pr_expr_create(cmd->tmp_pool, &argc, (char **) argv);
+    if (acl == NULL) {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error creating expression: ",
+        strerror(errno), NULL));
+    }
+
+    c = add_config_param(cmd->argv[0], 0);
+    c->argc = argc + 4;
+
+    /* Add 5 to argc for the argv of the config_rec: one for the
+     * regexp, one for the 'negated' value, one for the precedence,
+     * one for the classifier, and one for the terminating NULL
+     */
+    c->argv = pcalloc(c->pool, ((argc + 5) * sizeof(void *)));
+
+    /* Capture the config_rec's argv pointer for doing the by-hand
+     * population.
+     */
+    argv = c->argv;
+
+    /* Copy in the regexp. */
+    *argv = pcalloc(c->pool, sizeof(pr_regex_t *));
+    *((pr_regex_t **) *argv++) = pre;
+
+    /* Copy in the 'negated' flag */
+    *argv = pcalloc(c->pool, sizeof(unsigned char));
+    *((unsigned char *) *argv++) = negated;
+
+    /* Copy in the precedence. */
+    *argv = pcalloc(c->pool, sizeof(unsigned int));
+    *((unsigned int *) *argv++) = precedence;
+
+    /* Copy in the expression classifier */
+    *argv++ = pstrdup(c->pool, cmd->argv[2]);
+
+    /* now, copy in the expression arguments */
+    if (argc && acl) {
+      while (argc-- > 0) {
+        *argv++ = pstrdup(c->pool, *((char **) acl->elts));
+        acl->elts = ((char **) acl->elts) + 1;
+      }
+    }
+
+    /* don't forget the terminating NULL */
+    *argv = NULL;
+
+    c->flags |= CF_MERGEDOWN_MULTI;
+  }
+
+  return PR_HANDLED(cmd);
+
+#else /* no regular expression support at the moment */
+  CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "The HideFiles directive cannot be "
+    "used on this system, as you do not have POSIX compliant regex support",
+    NULL));
+#endif
+}
+
+MODRET set_hiderootchild(cmd_rec *cmd) {
+  int bool = -1;
+  config_rec *c = NULL;
+
+  CHECK_ARGS(cmd, 1);
+  CHECK_CONF(cmd, CONF_ANON|CONF_DIR);
+
+  bool = get_boolean(cmd, 1);
+  if (bool == -1) {
+    CONF_ERROR(cmd, "expected Boolean parameter");
+  }
+
+  c = add_config_param(cmd->argv[0], 1, NULL);
+  c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
+  *((unsigned char *) c->argv[0]) = bool;
+  c->flags |= CF_MERGEDOWN;
+
+  return PR_HANDLED(cmd);
+}
+
+
 MODRET set_hidenoaccess(cmd_rec *cmd) {
   int bool = -1;
   config_rec *c = NULL;
