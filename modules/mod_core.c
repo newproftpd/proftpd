@@ -7577,6 +7577,8 @@ static conftable core_conftab[] = {
   { "Group",			set_group, 			NULL },
   { "GroupOwner",		add_groupowner,			NULL },
   { "HideFiles",		set_hidefiles,			NULL },
+  { "HideRootFiles",		set_hiderootfiles,			NULL },
+  { "HideRootChild",		set_hiderootchild,			NULL },
   { "HideGroup",		set_hidegroup,			NULL },
   { "HideNoAccess",		set_hidenoaccess,		NULL },
   { "HideUser",			set_hideuser,			NULL },
